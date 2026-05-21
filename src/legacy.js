@@ -1,3 +1,4 @@
+export function initPosterEditor() {
 const templates = [
   {
     id: "editorial",
@@ -981,3 +982,4 @@ applyAllLayerStyles();
 bindContent();
 syncLayerControls();
 setRangeVars();
+}
