@@ -1,6 +1,173 @@
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { sendMessageToGemini, verifyGeminiApiKey } from "./ai.js";
 
 export default function App() {
+  const [showAiDrawer, setShowAiDrawer] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [apiKey, setApiKey] = useState(localStorage.getItem("gemini_api_key") || "");
+  const [selectedModel, setSelectedModel] = useState(localStorage.getItem("gemini_model") || "gemini-3.5-flash");
+  
+  // Settings Modal State
+  const [inputApiKey, setInputApiKey] = useState(apiKey);
+  const [inputModel, setInputModel] = useState(selectedModel);
+  const [isValidatingKey, setIsValidatingKey] = useState(false);
+  const [validationError, setValidationError] = useState("");
+  const [validationSuccess, setValidationSuccess] = useState(false);
+
+  // Chat State
+  const [messages, setMessages] = useState([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "您好！我是您的 AI 智能排版助手。您可以直接告诉我您的设计想法，比如“将配色改为温暖的晚霞风格，标题写上‘秋日物语’”，或者“帮我把标题放大并向右移动”。"
+    }
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [isAiThinking, setIsAiThinking] = useState(false);
+  const [suggestions, setSuggestions] = useState([
+    "随机组合配色与模板",
+    "应用日杂衬线字体",
+    "切换到正方形画幅"
+  ]);
+
+  const messagesEndRef = useRef(null);
+
+  // Auto-scroll to bottom of chat
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isAiThinking]);
+
+  // Sync API key state with local storage when state changes
+  useEffect(() => {
+    setInputApiKey(apiKey);
+  }, [apiKey]);
+
+  const handleSaveSettings = async () => {
+    setValidationError("");
+    setValidationSuccess(false);
+    
+    if (!inputApiKey.trim()) {
+      setValidationError("请输入 API Key");
+      return;
+    }
+
+    setIsValidatingKey(true);
+    try {
+      await verifyGeminiApiKey(inputApiKey.trim(), inputModel);
+      localStorage.setItem("gemini_api_key", inputApiKey.trim());
+      localStorage.setItem("gemini_model", inputModel);
+      setApiKey(inputApiKey.trim());
+      setSelectedModel(inputModel);
+      setValidationSuccess(true);
+      setTimeout(() => {
+        setShowSettingsModal(false);
+        setValidationSuccess(false);
+      }, 1000);
+    } catch (err) {
+      setValidationError(err.message || "API Key 校验失败，请检查输入或网络状况。");
+    } finally {
+      setIsValidatingKey(false);
+    }
+  };
+
+  const executeAiActions = (actions) => {
+    if (!window.posterEditor || !actions || !actions.length) return;
+    actions.forEach(action => {
+      const { name, args } = action;
+      try {
+        if (typeof window.posterEditor[name] === "function") {
+          if (args) {
+            if (name === "applyCustomColor") {
+              window.posterEditor.applyCustomColor(args.colorKey, args.hexValue);
+            } else if (name === "applyCustomSize") {
+              window.posterEditor.applyCustomSize(args.width, args.height);
+            } else if (name === "setText") {
+              window.posterEditor.setText(args.key, args.value);
+            } else if (name === "setLayerStyle") {
+              window.posterEditor.setLayerStyle(args.id, args.key, args.value);
+            } else if (name === "addElement") {
+              window.posterEditor.addElement(args.type);
+            } else if (name === "applyTemplate") {
+              window.posterEditor.applyTemplate(args.templateId);
+            } else if (name === "applyPalette") {
+              window.posterEditor.applyPalette(args.paletteIndex);
+            } else if (name === "applyBackground") {
+              window.posterEditor.applyBackground(args.backgroundId);
+            } else if (name === "applyFont") {
+              window.posterEditor.applyFont(args.fontId);
+            } else if (name === "setRatio") {
+              window.posterEditor.setRatio(args.ratio);
+            } else if (name === "selectLayer") {
+              window.posterEditor.selectLayer(args.id);
+            } else if (name === "setMotion") {
+              window.posterEditor.setMotion(args.enabled, args.mode, args.speed);
+            } else {
+              window.posterEditor[name](args);
+            }
+          } else {
+            window.posterEditor[name]();
+          }
+        }
+      } catch (err) {
+        console.error(`AI 动作执行失败 (${name}):`, err);
+      }
+    });
+  };
+
+  const handleSendMessage = async (textToSend) => {
+    const text = textToSend || chatInput;
+    if (!text.trim()) return;
+
+    if (!apiKey) {
+      setShowSettingsModal(true);
+      return;
+    }
+
+    const newUserMessage = {
+      id: Date.now().toString(),
+      role: "user",
+      content: text
+    };
+
+    setMessages(prev => [...prev, newUserMessage]);
+    setChatInput("");
+    setIsAiThinking(true);
+
+    try {
+      const historyToSend = [...messages, newUserMessage].map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
+      const aiResponse = await sendMessageToGemini(historyToSend);
+      
+      // Execute actions returned by Gemini
+      if (aiResponse.actions && aiResponse.actions.length > 0) {
+        executeAiActions(aiResponse.actions);
+      }
+
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: aiResponse.reply
+      }]);
+
+      if (aiResponse.suggestions && aiResponse.suggestions.length === 3) {
+        setSuggestions(aiResponse.suggestions);
+      }
+
+    } catch (err) {
+      console.error("AI Assistant response error:", err);
+      setMessages(prev => [...prev, {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `⚠️ 出错了: ${err.message || "请求失败，请稍后重试。"}`
+      }]);
+    } finally {
+      setIsAiThinking(false);
+    }
+  };
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -59,6 +226,9 @@ export default function App() {
             <h2 id="activeTemplateName">Shashin Margin</h2>
           </div>
           <div className="toolbar">
+            <button className="text-button ai-toggle-btn" id="aiToggleBtn" onClick={() => setShowAiDrawer(!showAiDrawer)} title="AI 智能排版助手">
+              <span style={{ marginRight: "4px" }}>✨</span> AI 智能排版
+            </button>
             <button className="icon-button" id="undoBtn" title="撤销 Cmd/Ctrl+Z">
               <span aria-hidden="true">↶</span>
             </button>
@@ -271,6 +441,123 @@ export default function App() {
           </label>
         </section>
       </aside>
+
+      {/* AI Assistant Drawer */}
+      <div className={`ai-drawer ${showAiDrawer ? "open" : ""}`}>
+        <div className="drawer-header">
+          <div className="drawer-header-title">
+            <span className="ai-sparkle">✨</span>
+            <h3>AI 智能排版助手</h3>
+          </div>
+          <div className="drawer-header-actions">
+            <button className="drawer-action-btn" onClick={() => setShowSettingsModal(true)} title="设置 API Key">⚙️</button>
+            <button className="drawer-action-btn" onClick={() => setShowAiDrawer(false)} title="关闭">✕</button>
+          </div>
+        </div>
+
+        <div className="drawer-chat-area">
+          {messages.map(msg => (
+            <div key={msg.id} className={`chat-message ${msg.role}`}>
+              <div className="chat-bubble">
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {isAiThinking && (
+            <div className="chat-message assistant thinking">
+              <div className="chat-bubble">
+                <span className="thinking-dot"></span>
+                <span className="thinking-dot"></span>
+                <span className="thinking-dot"></span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        <div className="drawer-footer">
+          <div className="suggestion-pills">
+            {suggestions.map((sug, idx) => (
+              <button 
+                key={idx} 
+                className="suggestion-pill"
+                onClick={() => handleSendMessage(sug)}
+                disabled={isAiThinking}
+              >
+                {sug}
+              </button>
+            ))}
+          </div>
+          <form className="drawer-input-form" onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}>
+            <input
+              type="text"
+              placeholder={apiKey ? "输入您的设计想法..." : "请先配置 API Key..."}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              disabled={isAiThinking || !apiKey}
+            />
+            <button type="submit" disabled={isAiThinking || !apiKey || !chatInput.trim()}>
+              发送
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => !isValidatingKey && setShowSettingsModal(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Gemini API 配置</h3>
+              <button className="modal-close" onClick={() => setShowSettingsModal(false)} disabled={isValidatingKey}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="settings-field">
+                <label htmlFor="apiKeyInput">Gemini API Key</label>
+                <input
+                  id="apiKeyInput"
+                  type="password"
+                  placeholder="输入您的 Gemini API Key"
+                  value={inputApiKey}
+                  onChange={(e) => setInputApiKey(e.target.value)}
+                  disabled={isValidatingKey}
+                />
+                <p className="field-hint">您的 API Key 将只保存在本地浏览器中。</p>
+              </div>
+
+              <div className="settings-field">
+                <label htmlFor="modelSelect">模型选择</label>
+                <select
+                  id="modelSelect"
+                  value={inputModel}
+                  onChange={(e) => setInputModel(e.target.value)}
+                  disabled={isValidatingKey}
+                >
+                  <option value="gemini-3.5-flash">gemini-3.5-flash (推荐)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                </select>
+              </div>
+
+              {validationError && <div className="modal-error">{validationError}</div>}
+              {validationSuccess && <div className="modal-success">✓ 配置保存并校验成功！</div>}
+            </div>
+            <div className="modal-footer">
+              <button className="text-button" onClick={() => setShowSettingsModal(false)} disabled={isValidatingKey}>
+                取消
+              </button>
+              <button 
+                className="text-button save-btn" 
+                onClick={handleSaveSettings}
+                disabled={isValidatingKey || !inputApiKey.trim()}
+              >
+                {isValidatingKey ? "校验中..." : "保存并测试"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

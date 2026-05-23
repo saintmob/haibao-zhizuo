@@ -982,4 +982,140 @@ applyAllLayerStyles();
 bindContent();
 syncLayerControls();
 setRangeVars();
+
+function setText(key, value) {
+  const pair = fields[key];
+  if (!pair) return;
+  pushHistory();
+  pair[0].value = value;
+  pair[1].textContent = value;
+}
+
+function setLayerStyle(id, key, value) {
+  const state = layerState[id];
+  if (!state) return;
+  pushHistory();
+  if (key === "visible") {
+    state.visible = !!value;
+  } else {
+    state[key] = Number(value);
+  }
+  applyLayerStyles(id);
+  if (id === activeLayer) {
+    syncLayerControls();
+  } else {
+    updateLayerPanel();
+  }
+}
+
+window.posterEditor = {
+  getState: () => {
+    return {
+      currentTemplate,
+      currentPalette: palettes[currentPalette] || palettes[0],
+      paletteIndex: currentPalette,
+      currentBackground,
+      currentFont,
+      activeLayer,
+      currentSize,
+      layers: layers.map(l => ({
+        id: l.id,
+        name: l.name,
+        state: layerState[l.id]
+      })),
+      text: {
+        kicker: fields.kicker[0].value,
+        title: fields.title[0].value,
+        subtitle: fields.subtitle[0].value,
+        date: fields.date[0].value,
+        place: fields.place[0].value
+      },
+      colors: {
+        paper: colorControls.paper.value,
+        ink: colorControls.ink.value,
+        tone: colorControls.tone.value,
+        accent: colorControls.accent.value
+      },
+      motion: {
+        enabled: motionControls.toggle.checked,
+        mode: currentMotionMode,
+        speed: motionControls.speed.value
+      }
+    };
+  },
+  applyTemplate: (id) => {
+    pushHistory();
+    applyTemplate(id);
+  },
+  applyPalette: (index) => {
+    pushHistory();
+    applyPalette(index);
+  },
+  applyCustomColor: (key, value) => {
+    pushHistory();
+    colorControls[key].value = value;
+    applyCustomColor(key, value);
+  },
+  applyBackground: (id) => {
+    pushHistory();
+    applyBackground(id);
+  },
+  applyFont: (id) => {
+    pushHistory();
+    applyFont(id);
+  },
+  setRatio: (ratio) => {
+    pushHistory();
+    setRatio(ratio);
+  },
+  applyCustomSize: (width, height) => {
+    pushHistory();
+    applyCustomSize(width, height, "custom");
+  },
+  setText: (key, value) => {
+    setText(key, value);
+  },
+  setLayerStyle: (id, key, value) => {
+    setLayerStyle(id, key, value);
+  },
+  selectLayer: (id) => {
+    selectLayer(id);
+  },
+  addElement: (type) => {
+    addElement(type);
+  },
+  deleteActiveLayer: () => {
+    deleteActiveLayer();
+  },
+  duplicateActiveLayer: () => {
+    duplicateActiveLayer();
+  },
+  randomize: () => {
+    pushHistory();
+    randomize();
+  },
+  undo: () => {
+    undo();
+  },
+  redo: () => {
+    redo();
+  },
+  exportPoster: () => {
+    exportPoster();
+  },
+  setMotion: (enabled, mode, speed) => {
+    pushHistory();
+    motionControls.toggle.checked = enabled;
+    if (mode) {
+      currentMotionMode = mode;
+      motionControls.modes.querySelectorAll("button").forEach((button) => {
+        button.classList.toggle("active", button.dataset.motion === currentMotionMode);
+      });
+    }
+    if (speed) {
+      motionControls.speed.value = speed;
+    }
+    applyMotion();
+  }
+};
 }
